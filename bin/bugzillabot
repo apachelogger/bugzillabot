@@ -100,7 +100,6 @@ bugs.each do |bug|
     # This bug is in needsinfo for more than 15 days but has a fairly recent
     # comment that is not a reminder and is thus considered active.
     warn "Bug #{bug.id} does not need actioning. [#{delta}; #{was_reminded}]"
-    raise unless %w[319717 348382 367860 369663].include?(bug.id.to_s)
   end
 end
 
