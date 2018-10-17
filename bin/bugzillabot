@@ -43,8 +43,6 @@ bugs = Bugzillabot::Bug.search(
 )
 
 puts "There are #{bugs.size} candidate bugs"
-until gets.strip == 'k'
-end
 
 5.times { puts }
 
