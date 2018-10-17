@@ -1,0 +1,136 @@
+#!/usr/bin/env ruby
+#
+# Copyright (C) 2018 Harald Sitter <sitter@kde.org>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation; either version 3 of
+# the License or any later version accepted by the membership of
+# KDE e.V. (or its successor approved by the membership of KDE
+# e.V.), which shall act as a proxy defined in Section 14 of
+# version 3 of the license.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+require 'pp'
+require 'date'
+
+require_relative '../lib/bugzillabot'
+require_relative '../lib/monkey'
+require_relative '../lib/template'
+
+BOT_USER = 'sitter@kde.org'.freeze
+BUGZILLA_URL = Bugzillabot.config.bugzilla_url
+
+puts Bugzillabot::Connection.new.get('version').body
+
+# FIXME: our bugzilla is too old omg
+# p c.get 'whoami'
+
+bugs = Bugzillabot::Bug.search(
+  # product: 'neon',
+  status: 'NEEDSINFO',
+  resolution: 'WAITINGFORINFO',
+  last_change_time: (Date.today - 15).iso8601,
+  # last_change_time: Date.parse('2017-01-01').iso8601,
+  limit: 32
+)
+
+puts "There are #{bugs.size} candidate bugs"
+until gets.strip == 'k'
+end
+
+5.times { puts }
+
+# * Bugs placed into NEEDSINFO status will received a reminder if the ticket is:
+#  - At least 15 days old
+bugs.reject! do |bug|
+  delta = (Date.today - bug.changed_status_at.to_date).to_i
+  if delta < 15
+    puts "Bug ##{bug.id} has needinfo for less than 15 days (#{delta}) -> skipping"
+    next true
+  end
+  false
+end
+
+# AND
+#  - Has not received any comment within 15 days
+
+# We'll now walk them again to determine the action for them.
+# - Bugs that had no comment in more than 15 days AND the last comment was from
+#   the bot (i.e. a bug which was already reminded) will be closed
+# - Bugs which had no comment in more than 15 days get a reminder otherwise.
+#   This will make the bot user the user to comment and thus trigger the above
+#   scenario if it goes
+
+to_remind = []
+to_close = []
+
+def bug_reminded?(bug)
+  comments = bug.comments_since_status_change
+  comment = comments[-1]
+  return false unless comment
+  return true if comment.creator == BOT_USER
+  if comment.creator == 'andrew.crouthamel@kdemail.net' &&
+     comment.text.downcase.start_with?('dear bug submitter')
+    return true
+  end
+  false
+end
+
+bugs.each do |bug|
+  comments = bug.comments_since_status_change
+  last_comment = comments[-1]
+  was_reminded = bug_reminded?(bug)
+  delta = (Date.today - last_comment.time.to_date).to_i unless comments.empty?
+  delta ||= (Date.today - bug.changed_status_at.to_date).to_i
+  if delta && delta >= 15 && was_reminded
+    puts "Bug #{bug.id} had no comment within the last 30 days (#{delta}) -> CLOSE"
+    to_close << bug
+  elsif delta && delta >= 15
+    puts "Bug #{bug.id} had a comment within the last 30 days (#{delta}) -> REMIND"
+    to_remind << bug
+  elsif was_reminded
+    warn "Bug #{bug.id} was already reminded. Reminder not old enough (#{delta})"
+  else # !was_reminded
+    # This bug is in needsinfo for more than 15 days but has a fairly recent
+    # comment that is not a reminder and is thus considered active.
+    warn "Bug #{bug.id} does not need actioning. [#{delta}; #{was_reminded}]"
+    raise unless %w[319717 348382 367860 369663].include?(bug.id.to_s)
+  end
+end
+
+2.times { puts }
+
+# FIXME: revise config key and derive url from there
+to_remind.each do |bug|
+  puts "REMINDING #{BUGZILLA_URL}/show_bug.cgi?id=#{bug.id}"
+end
+
+to_close.each do |bug|
+  puts "CLOSING #{BUGZILLA_URL}/show_bug.cgi?id=#{bug.id}"
+end
+
+exit
+puts "Going to close #{to_close.size} and remind #{to_remind.size} bugs"
+until gets.strip == 'k'
+end
+
+to_remind.each do |bug|
+  puts "REMINDING #{BUGZILLA_URL}/show_bug.cgi?id=#{bug.id}"
+  bug.comment(Template.remind)
+end
+
+to_close.each do |bug|
+  puts "CLOSING #{BUGZILLA_URL}/show_bug.cgi?id=#{bug.id}"
+  # FIXME: really worksforme?
+  bug.update(status: 'RESOLVED',
+             resolution: 'WORKSFORME',
+             comment: { body: Template.close })
+end

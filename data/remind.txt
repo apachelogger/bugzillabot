@@ -1,0 +1,18 @@
+Dear Bug Submitter,
+
+This bug has been in NEEDSINFO status with no change for at least
+15 days. Please provide the requested information as soon as
+possible and set the bug status as REPORTED. Due to regular bug
+tracker maintenance, if the bug is still in NEEDSINFO status with
+no change in 30 days the bug will be closed as RESOLVED > WORKSFORME
+due to lack of needed information.
+
+For more information about our bug triaging procedures please read the
+wiki located here:
+https://community.kde.org/Guidelines_and_HOWTOs/Bug_triaging
+
+If you have already provided the requested information, please
+mark the bug as REPORTED so that the KDE team knows that the bug is
+ready to be confirmed.
+
+Thank you for helping us make KDE software even better for everyone!

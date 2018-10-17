@@ -1,0 +1,6 @@
+production:
+  url: https://localhost/rest
+  api_key: production-api-key
+testing:
+  url: https://localhost/rest
+  api_key: testing-api-key
