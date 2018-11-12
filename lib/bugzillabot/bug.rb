@@ -138,7 +138,42 @@ module Bugzillabot
         from_s(res.body, connection)[0]
       end
 
-      def search(kwords, connection = Connection.new)
+      # A search gets automatically paginated iff this method is called with
+      # a block and without explicit `offset` and `limit` parameters.
+      #
+      # When any of these is not true a blanket search is done. This search
+      # will still yield but not automatically paginate the request (i.e.
+      # if you do a heavy search it will take a long time to return).
+      #
+      # @return <[Bug], nil> Blanket searches always return the full result
+      #   array, even when used with a block. Automatically paginated searches
+      #   never return an array but always return nil. As such pagination
+      #   is always lighter on the memory footprint.
+      def search(kwords, connection = Connection.new, &block)
+        unless %i[offset limit].any? { |x| kwords.include?(x) } && block_given?
+          yield_pages(kwords, connection, &block)
+          return nil
+        end
+        search_all(kwords, connection)
+      end
+
+      private
+
+      def yield_pages(kwords, connection = Connection.new, &block)
+        # There is no one right value. 8 is sufficiently small not to break
+        # the remote, but large enough to not have to query too much.
+        limit = kwords.fetch('limit', 8)
+        offset = 0
+        loop do
+          args = kwords.merge(limit: limit, offset: offset)
+          # search_all yields when given a block
+          bugs = search_all(args, connection, &block)
+          offset += limit
+          break if bugs.empty?
+        end
+      end
+
+      def search_all(kwords, connection = Connection.new, &block)
         res = connection.get('bug') do |req|
           req.params.merge!(kwords)
         end
@@ -149,11 +184,10 @@ module Bugzillabot
         bugs.collect do |bug|
           bug.history
           bug.comments_since_status_change
+          yield bug if block_given?
           bug
         end
       end
-
-      private
 
       def from_s(string, connection)
         bugs = JSON.parse(string).fetch('bugs')
