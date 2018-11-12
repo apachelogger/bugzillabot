@@ -25,50 +25,14 @@ require_relative '../lib/bugzillabot'
 require_relative '../lib/monkey'
 require_relative '../lib/template'
 
-BOT_USER = 'sitter@kde.org'.freeze
+warn 'FIXME: load username from config'
+BOT_USER = 'bug-janitor@kde.org'.freeze
 BUGZILLA_URL = Bugzillabot.config.bugzilla_url
 
 puts Bugzillabot::Connection.new.get('version').body
 
 # FIXME: our bugzilla is too old omg
 # p c.get 'whoami'
-
-bugs = Bugzillabot::Bug.search(
-  # product: 'neon',
-  status: 'NEEDSINFO',
-  resolution: 'WAITINGFORINFO',
-  last_change_time: (Date.today - 15).iso8601,
-  # last_change_time: Date.parse('2017-01-01').iso8601,
-  limit: 32
-)
-
-puts "There are #{bugs.size} candidate bugs"
-
-5.times { puts }
-
-# * Bugs placed into NEEDSINFO status will received a reminder if the ticket is:
-#  - At least 15 days old
-bugs.reject! do |bug|
-  delta = (Date.today - bug.changed_status_at.to_date).to_i
-  if delta < 15
-    puts "Bug ##{bug.id} has needinfo for less than 15 days (#{delta}) -> skipping"
-    next true
-  end
-  false
-end
-
-# AND
-#  - Has not received any comment within 15 days
-
-# We'll now walk them again to determine the action for them.
-# - Bugs that had no comment in more than 15 days AND the last comment was from
-#   the bot (i.e. a bug which was already reminded) will be closed
-# - Bugs which had no comment in more than 15 days get a reminder otherwise.
-#   This will make the bot user the user to comment and thus trigger the above
-#   scenario if it goes
-
-to_remind = []
-to_close = []
 
 def bug_reminded?(bug)
   comments = bug.comments_since_status_change
@@ -82,25 +46,60 @@ def bug_reminded?(bug)
   false
 end
 
-bugs.each do |bug|
-  comments = bug.comments_since_status_change
-  last_comment = comments[-1]
-  was_reminded = bug_reminded?(bug)
-  delta = (Date.today - last_comment.time.to_date).to_i unless comments.empty?
-  delta ||= (Date.today - bug.changed_status_at.to_date).to_i
-  if delta && delta >= 15 && was_reminded
-    puts "Bug #{bug.id} had no comment within the last 30 days (#{delta}) -> CLOSE"
-    to_close << bug
-  elsif delta && delta >= 15
-    puts "Bug #{bug.id} had a comment within the last 30 days (#{delta}) -> REMIND"
-    to_remind << bug
-  elsif was_reminded
-    warn "Bug #{bug.id} was already reminded. Reminder not old enough (#{delta})"
-  else # !was_reminded
-    # This bug is in needsinfo for more than 15 days but has a fairly recent
-    # comment that is not a reminder and is thus considered active.
-    warn "Bug #{bug.id} does not need actioning. [#{delta}; #{was_reminded}]"
+to_remind = []
+to_close = []
+
+bugs = Bugzillabot::Bug.search(
+  # product: 'neon',
+  status: 'NEEDSINFO',
+  last_change_time: (Date.today - 60).iso8601,
+  # last_change_time: Date.parse('2017-01-01').iso8601,
+  # limit: 32
+) do |bug|
+  1.times { puts }
+
+  # * Bugs placed into NEEDSINFO status will received a reminder if the ticket is:
+  #  - At least 15 days old
+  begin
+    delta = (Date.today - bug.changed_status_at.to_date).to_i
+    if delta < 15
+      puts "Bug ##{bug.id} has needinfo for less than 15 days (#{delta}) -> skipping"
+      next
+    end
   end
+
+  # AND
+  #  - Has not received any comment within 15 days
+
+  # We'll now walk them again to determine the action for them.
+  # - Bugs that had no comment in more than 15 days AND the last comment was from
+  #   the bot (i.e. a bug which was already reminded) will be closed
+  # - Bugs which had no comment in more than 15 days get a reminder otherwise.
+  #   This will make the bot user the user to comment and thus trigger the above
+  #   scenario if it goes
+
+  begin
+    comments = bug.comments_since_status_change
+    last_comment = comments[-1]
+    was_reminded = bug_reminded?(bug)
+    delta = (Date.today - last_comment.time.to_date).to_i unless comments.empty?
+    delta ||= (Date.today - bug.changed_status_at.to_date).to_i
+    if delta && delta >= 15 && was_reminded
+      puts "Bug #{bug.id} had no comment within the last 30 days (#{delta}) -> CLOSE"
+      to_close << bug
+    elsif delta && delta >= 15
+      puts "Bug #{bug.id} had a comment within the last 30 days (#{delta}) -> REMIND"
+      to_remind << bug
+    elsif was_reminded
+      warn "Bug #{bug.id} was already reminded. Reminder not old enough (#{delta})"
+    else # !was_reminded
+      # This bug is in needsinfo for more than 15 days but has a fairly recent
+      # comment that is not a reminder and is thus considered active.
+      warn "Bug #{bug.id} does not need actioning. [#{delta}; #{was_reminded}]"
+    end
+  end
+
+  warn " -- Done with #{bug.id}"
 end
 
 2.times { puts }
@@ -114,10 +113,12 @@ to_close.each do |bug|
   puts "CLOSING #{BUGZILLA_URL}/show_bug.cgi?id=#{bug.id}"
 end
 
-warn 'aborting here for now. NO CHANGES HAVE BEEN APPLIED'
-exit
+# warn 'aborting here for now. NO CHANGES HAVE BEEN APPLIED'
+# exit
 puts "Going to close #{to_close.size} and remind #{to_remind.size} bugs"
-until gets.strip == 'k'
+loop do
+  puts 'enter "k" or ctrl-c to abort'
+  break if gets.strip == 'k'
 end
 
 to_remind.each do |bug|
